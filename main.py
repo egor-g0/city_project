@@ -1,16 +1,15 @@
 import vk_api
-from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
+from vk_api.longpoll import VkLongPoll, VkEventType
 import random
 import sqlite3
 
-TOKEN = 'vk1.a.L3pFBJjGZSPzMMc2xcuLSoeaeMuMAj4HH0rVEtTlpelLP4CzxyPKT5upGcEFuxHx1hPYxRu3ETD2TWrihX9yvtCFNI7N2gRQw4KdmOvO1sKjNkPUiwZM1iH3FlrG7lr0mOqI_EQ_MnPJ0fMz2AbMraOrOaYAB2honTf4hR8ilMfiphgNBw3LaFFXOKivAtwfdpPwIWCVL2g6YHM3BOGzLA'
 
-vk_session = vk_api.VkApi(token=TOKEN)
-longpoll = VkBotLongPoll(vk_session, 230121325)
+TOKEN = 'vk1.a.9AXQK0ZpxDPIppSw06M8VU5hC4uR3a8f1Q3mGvavHnlPfimEBewWV2-NPC9oyID3v1bRrMcLzVeA-6QSZoBFBBL7-ijtAIwAf3KiqV6krIuOvLxiIRLjdtn5v8bsYdK9vMmWxZVblUBh_fLXbMUfNjeS21cNex_uq72nTw_cEUnI2WCbPgHziUKM4carSh-4HphVN0s2uckkdJpjVJYPVg'
 
-# Для хранения текущих игр
+vk = vk_api.VkApi(token=TOKEN)
+longpoll = VkLongPoll(vk)
+
 games = {}
-
 
 def get_city_starting_with(letter, used_cities):
     con = sqlite3.connect("cities.db")
@@ -18,6 +17,7 @@ def get_city_starting_with(letter, used_cities):
     result = cur.execute(f"""SELECT city FROM cities
                 WHERE city LIKE '{letter}%'""").fetchall()
     s = [i[0] for i in result]
+    random.shuffle(s)
     con.close()
     if s:
         for j in s:
@@ -25,22 +25,11 @@ def get_city_starting_with(letter, used_cities):
                 return j
     return None
 
-
 def get_last_valid_letter(city_name):
     last_char = city_name[-1]
     if last_char in ['ь', 'ъ', 'ы']:
         return get_last_valid_letter(city_name[:-1])
     return last_char
-
-
-def send_message(user_id, chat_id, text):
-    random_id = random.randint(0, 10 ** 5)
-    vk = vk_session.get_api()
-
-    vk.messages.send(user_id=user_id,
-                     message=text,
-                     random_id=random_id)
-
 
 def get_bot_first_city():
     con = sqlite3.connect("cities.db")
@@ -50,7 +39,6 @@ def get_bot_first_city():
     s = [i[0] for i in result]
     con.close()
     return s[0]
-
 
 def city_check(city, last_city):
     if get_last_valid_letter(last_city) != city[0]:
@@ -65,60 +53,69 @@ def city_check(city, last_city):
     if city in games[chat_id]['used']:
         return "Этот город уже был назван. Попробуйте другой."
     return "OK"
+def send_messages(chat_id, text):
+    random_id = random.randint(0, 10000)
+    vk.method('messages.send', {'chat_id': chat_id, 'message': text, 'random_id': random_id})
 
-
+flag = False
 for event in longpoll.listen():
-    if event.type == VkBotEventType.MESSAGE_NEW:
-        msg = event.obj.message['text']
-        chat_id = event.chat_id
-        user_id = event.obj.message['from_id']
-        text = msg.lower()
-        print(text)
-
-        """Собеседник неизвестен, выводится после его первого сообщения-приветствия"""
-        if chat_id not in games.keys():
-            print('flag0')
-            games[chat_id] = {
-                'used': set(),
-                'last_city': None
-            }
-            send_message(user_id, chat_id, "Привет! Напишите 'начать игру', чтобы сыграть в города.")
-
-        """Собеседник известен и начинает игру, запись данных в словарь"""
-        if text == 'начать игру':
-
-            bot_city = get_bot_first_city()
-            games[chat_id]['used'].add(bot_city)
-            games[chat_id]['last_city'] = bot_city
-            """Бот начинает игру и пишет свой город"""
-            send_message(user_id, chat_id,
-                         f"Начинаем игру! Мой город: {bot_city.capitalize()}. Ваш ход! Чтобы сдаться, напишите 'сдаюсь'")
-        elif not chat_id:
-            """Собеседник хочет сдаться, завершение игры"""
-            if text == 'сдаюсь':
-                print('flag3')
-                send_message(user_id, chat_id, "Игра окончена. Чтобы начать заново, напишите 'начать игру'")
-                del games[chat_id]
-            else:
-                print('flag1')
-                last_city = games[chat_id]['last_city']
-                status = city_check(text, last_city)
-                print('flag2')
-                if status == "OK":
-                    """Город подходит под условия, ход бота"""
-                    games[chat_id]['used'].add(text)
-                    last_letter = get_last_valid_letter(text)
-
-                    bot_city = get_city_starting_with(last_letter, games[chat_id]['used'])
-                    if bot_city:
-                        games[chat_id]['used'].add(bot_city)
-                        games[chat_id]['last_city'] = bot_city
-                        """Бот отвечает своим городом"""
-                        send_message(user_id, chat_id, f"Мой город: {bot_city.capitalize()}. Ваш ход!")
-                    else:
-                        """Город не найден, победил собеседник, завершение игры"""
-                        send_message(user_id, chat_id, "Я не могу найти подходящий город. Вы победили!")
-                        del games[chat_id]
+    if event.type == VkEventType.MESSAGE_NEW:
+        if event.to_me:
+            if event.from_chat:
+                msg = event.text.lower()
+                chat_id = event.chat_id
+                user_id = event.user_id
+                user_info = vk.method('users.get', {
+                    'user_ids': user_id,
+                    'fields': 'screen_name'
+                })[0]
+                first_name = user_info['first_name']
+                last_name = user_info['last_name']
+                username = f"@{user_info['screen_name']}" if 'screen_name' in user_info else ""
+                if chat_id not in games.keys():
+                    games[chat_id] = {
+                    'used': set(),
+                    'last_city': None,
+                    'counter': 0
+                    }
+                    send_messages(chat_id, f"Здравствуйте, {first_name}! Напишите 'Начать игру', чтобы сыграть в города. "
+                                           f"Города - простая игра. Я вам называю город, а вы должны назвать другой город, который начинается с последней буквы моего города. "
+                                           f"Буквы ь, ы, ъ не считаются. Удачной игры :)")
                 else:
-                    """Возникла ошибка, город по какой-то причине не подходит"""
-                    send_message(user_id, chat_id, status)
+                    if not flag:
+                        if msg == 'начать игру':
+                            a = get_bot_first_city()
+                            games[chat_id]['used'].add(a)
+                            games[chat_id]['last_city'] = a
+                            send_messages(chat_id, f"Начинаем! Мой город - {a.capitalize()}, вам на {get_last_valid_letter(a).capitalize()}. Чтобы сдаться, напишите 'сдаюсь'")
+                            flag = True
+                        else:
+                            send_messages(chat_id, "Напишите 'Начать игру', чтобы сыграть в города.")
+                    else:
+                        if msg.lower() == 'сдаюсь':
+                            send_messages(chat_id, f"Игра окончена. Ваш счёт: {games[chat_id]['counter']}")
+                            del games[chat_id]
+                            flag = False
+                        else:
+                            last_city = games[chat_id]['last_city']
+                            status = city_check(msg, last_city)
+                            if status == "OK":
+                                """Город подходит под условия, ход бота"""
+                                games[chat_id]['used'].add(msg)
+                                games[chat_id]['counter'] += 1
+                                last_letter = get_last_valid_letter(msg)
+
+                                bot_city = get_city_starting_with(last_letter, games[chat_id]['used'])
+                                if bot_city:
+                                    games[chat_id]['used'].add(bot_city)
+                                    games[chat_id]['last_city'] = bot_city
+                                    """Бот отвечает своим городом"""
+                                    send_messages(chat_id, f"Мой город: {bot_city.capitalize()}. Ваш ход!")
+                                else:
+                                    """Город не найден, победил собеседник, завершение игры"""
+                                    send_messages(chat_id, "Я не могу найти подходящий город. Вы победили!")
+                                    del games[chat_id]
+                                    flag = False
+                            else:
+                                """Возникла ошибка, город по какой-то причине не подходит"""
+                                send_messages(chat_id, status)
