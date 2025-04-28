@@ -1,0 +1,5 @@
+vk_api
+random
+sqlite3
+requests
+flask
